@@ -38,7 +38,7 @@ type
 function CompareVersionProc(List: TStringList; Index1, Index2: Integer): Integer; // Объявление вне класса
 
 const
-  LauncherVersion = '1.0.2';
+  LauncherVersion = '1.0.3';
   JavaInstaller = 'OpenJDK21U-jdk_x64_windows_hotspot_21.0.8_9.msi';
   LogDir = 'ElephantMonitor';
 
@@ -89,32 +89,35 @@ begin
     V1Parts.DelimitedText := V1Base;
     V2Parts.DelimitedText := V2Base;
 
-    // Сравниваем числовые компоненты
+    // Сравниваем числовые компоненты (от новой к старой)
     for I := 0 to Min(V1Parts.Count, V2Parts.Count) - 1 do
     begin
       V1Num := StrToIntDef(V1Parts[I], 0);
       V2Num := StrToIntDef(V2Parts[I], 0);
       if V1Num > V2Num then
-        Exit(-1) // Version1 больше, ставим раньше
+        Exit(-1) // V1 больше, ставим раньше
       else if V1Num < V2Num then
-        Exit(1); // Version2 больше, ставим раньше
+        Exit(1); // V2 больше, ставим раньше
     end;
 
     // Если числовые части равны, сравниваем длину
-    if V1Parts.Count <> V2Parts.Count then
-      Exit(V2Parts.Count - V1Parts.Count); // Более длинная версия новее
+    if V1Parts.Count > V2Parts.Count then
+      Exit(-1)
+    else if V1Parts.Count < V2Parts.Count then
+      Exit(1);
 
-    // Если числовые части равны, сравниваем статус (Alpha > Beta > '')
-    if (V1Status = V2Status) then
-      Exit(0)
-    else if (V1Status = 'Alpha') and (V2Status = 'Beta') then
-      Exit(-1) // Alpha новее Beta
-    else if (V1Status = 'Beta') and (V2Status = 'Alpha') then
-      Exit(1)
-    else if (V1Status = '') then
-      Exit(1) // Версия без статуса старее
-    else if (V2Status = '') then
-      Exit(-1); // Версия без статуса старее
+    // Если числовые части равны, сравниваем статус (как в Java: Alpha < Beta лексикографически, но lower считается новее; stable старше)
+    if V1Status = V2Status then
+      Exit(0);
+
+    if (V1Status = '') and (V2Status <> '') then
+      Exit(1)  // V1 stable, но по Java логике stable старше (V1 после V2)
+    else if (V1Status <> '') and (V2Status = '') then
+      Exit(-1) // V1 has suffix, новее stable (V1 перед V2)
+    else if AnsiCompareText(V1Status, V2Status) < 0 then
+      Exit(-1) // V1 suffix < V2, V1 новее (как found < current в Java)
+    else
+      Exit(1);
   finally
     V1Parts.Free;
     V2Parts.Free;
@@ -298,6 +301,7 @@ var
   AppPath, JarPath: string;
   VersionList: TStringList;
   Version, FileName: string;
+  Pos1, Pos2: Integer;
 begin
   try
     AppPath := ExtractFilePath(Application.ExeName);
@@ -324,10 +328,18 @@ begin
         if FileExists(JarPath) then
         begin
           FileName := ExtractFileName(JarPath);
-          // Извлекаем версию из имени файла (например, "1.8.18-Beta" из "Elephant-Monitor-1.8.18-Beta.jar")
-          Version := Copy(FileName, Pos('-', FileName) + 1, Length(FileName));
-          Version := Copy(Version, 1, Pos('.jar', Version) - 1);
-          VersionList.Add(Version + ';' + FileName);
+          // Извлекаем версию после второго '-' (например, "1.8.18-Beta" из "Elephant-Monitor-1.8.18-Beta.jar")
+          Pos1 := Pos('-', FileName);
+          if Pos1 > 0 then
+          begin
+            Pos2 := PosEx('-', FileName, Pos1 + 1);
+            if Pos2 > 0 then
+            begin
+              Version := Copy(FileName, Pos2 + 1, PosEx('.jar', FileName, Pos2) - (Pos2 + 1));
+              if Version <> '' then
+                VersionList.Add(Version + ';' + FileName);
+            end;
+          end;
         end;
       end;
 

@@ -6,7 +6,7 @@ interface
 
 uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, StdCtrls, Process,
-  FileUtil, StrUtils;
+  FileUtil, StrUtils, Math; // Добавлен Math
 
 type
   { TForm1 }
@@ -32,9 +32,10 @@ type
     function GetAppVersion(const JarPath: string): string;
     procedure LogError(const Msg: string; Critical: Boolean = False);
     procedure InitializeForm;
-    function CompareVersionProc(List: TStringList; Index1, Index2: Integer): Integer; // Добавлено объявление
   public
   end;
+
+function CompareVersionProc(List: TStringList; Index1, Index2: Integer): Integer; // Объявление вне класса
 
 const
   LauncherVersion = '1.0.2';
@@ -49,6 +50,79 @@ implementation
 {$R *.lfm}
 
 { TForm1 }
+
+function CompareVersionProc(List: TStringList; Index1, Index2: Integer): Integer;
+var
+  Version1, Version2: string;
+  V1Parts, V2Parts: TStringList;
+  V1Num, V2Num, I: Integer;
+  V1Status, V2Status: string;
+  V1Base, V2Base: string;
+begin
+  // Извлекаем версии из списка
+  Version1 := Copy(List[Index1], 1, Pos(';', List[Index1]) - 1);
+  Version2 := Copy(List[Index2], 1, Pos(';', List[Index2]) - 1);
+
+  // Извлекаем числовую часть и статус
+  V1Base := Version1;
+  V2Base := Version2;
+  V1Status := '';
+  V2Status := '';
+
+  if Pos('-', Version1) > 0 then
+  begin
+    V1Base := Copy(Version1, 1, Pos('-', Version1) - 1);
+    V1Status := Copy(Version1, Pos('-', Version1) + 1, Length(Version1));
+  end;
+  if Pos('-', Version2) > 0 then
+  begin
+    V2Base := Copy(Version2, 1, Pos('-', Version2) - 1);
+    V2Status := Copy(Version2, Pos('-', Version2) + 1, Length(Version2));
+  end;
+
+  // Разбиваем числовую часть на компоненты
+  V1Parts := TStringList.Create;
+  V2Parts := TStringList.Create;
+  try
+    V1Parts.Delimiter := '.';
+    V2Parts.Delimiter := '.';
+    V1Parts.DelimitedText := V1Base;
+    V2Parts.DelimitedText := V2Base;
+
+    // Сравниваем числовые компоненты (от новой к старой)
+    for I := 0 to Min(V1Parts.Count, V2Parts.Count) - 1 do
+    begin
+      V1Num := StrToIntDef(V1Parts[I], 0);
+      V2Num := StrToIntDef(V2Parts[I], 0);
+      if V1Num > V2Num then
+        Exit(-1) // V1 больше, ставим раньше
+      else if V1Num < V2Num then
+        Exit(1); // V2 больше, ставим раньше
+    end;
+
+    // Если числовые части равны, сравниваем длину
+    if V1Parts.Count > V2Parts.Count then
+      Exit(-1)
+    else if V1Parts.Count < V2Parts.Count then
+      Exit(1);
+
+    // Если числовые части равны, сравниваем статус (как в Java: Alpha < Beta лексикографически, но lower считается новее; stable старше)
+    if V1Status = V2Status then
+      Exit(0);
+
+    if (V1Status = '') and (V2Status <> '') then
+      Exit(1)  // V1 stable, но по Java логике stable старше (V1 после V2)
+    else if (V1Status <> '') and (V2Status = '') then
+      Exit(-1) // V1 has suffix, новее stable (V1 перед V2)
+    else if AnsiCompareText(V1Status, V2Status) < 0 then
+      Exit(-1) // V1 suffix < V2, V1 новее (как found < current в Java)
+    else
+      Exit(1);
+  finally
+    V1Parts.Free;
+    V2Parts.Free;
+  end;
+end;
 
 procedure TForm1.LogError(const Msg: string; Critical: Boolean = False);
 var
@@ -220,76 +294,6 @@ begin
   InitializeForm;
 end;
 
-function TForm1.CompareVersionProc(List: TStringList; Index1, Index2: Integer): Integer;
-var
-  Version1, Version2: string;
-  V1Parts, V2Parts: TStringList;
-  V1Num, V2Num, I: Integer;
-  V1Status, V2Status: string;
-  V1Base, V2Base: string;
-begin
-  // Извлекаем версии из списка
-  Version1 := Copy(List[Index1], 1, Pos(';', List[Index1]) - 1);
-  Version2 := Copy(List[Index2], 1, Pos(';', List[Index2]) - 1);
-
-  // Извлекаем числовую часть и статус
-  V1Base := Version1;
-  V2Base := Version2;
-  V1Status := '';
-  V2Status := '';
-
-  if Pos('-', Version1) > 0 then
-  begin
-    V1Base := Copy(Version1, 1, Pos('-', Version1) - 1);
-    V1Status := Copy(Version1, Pos('-', Version1) + 1, Length(Version1));
-  end;
-  if Pos('-', Version2) > 0 then
-  begin
-    V2Base := Copy(Version2, 1, Pos('-', Version2) - 1);
-    V2Status := Copy(Version2, Pos('-', Version2) + 1, Length(Version2));
-  end;
-
-  // Разбиваем числовую часть на компоненты
-  V1Parts := TStringList.Create;
-  V2Parts := TStringList.Create;
-  try
-    V1Parts.Delimiter := '.';
-    V2Parts.Delimiter := '.';
-    V1Parts.DelimitedText := V1Base;
-    V2Parts.DelimitedText := V2Base;
-
-    // Сравниваем числовые компоненты
-    for I := 0 to Min(V1Parts.Count, V2Parts.Count) - 1 do
-    begin
-      V1Num := StrToIntDef(V1Parts[I], 0);
-      V2Num := StrToIntDef(V2Parts[I], 0);
-      if V1Num > V2Num then
-        Exit(-1) // Version1 больше, ставим раньше
-      else if V1Num < V2Num then
-        Exit(1); // Version2 больше, ставим раньше
-    end;
-
-    // Если числовые части равны, сравниваем длину
-    if V1Parts.Count <> V2Parts.Count then
-      Exit(V2Parts.Count - V1Parts.Count); // Более длинная версия новее
-
-    // Если числовые части равны, сравниваем статус (Alpha > Beta > '')
-    if (V1Status = V2Status) then
-      Exit(0)
-    else if (V1Status = 'Alpha') and (V2Status = 'Beta') then
-      Exit(-1) // Alpha новее Beta
-    else if (V1Status = 'Beta') and (V2Status = 'Alpha') then
-      Exit(1)
-    else if (V1Status = '') then
-      Exit(1) // Версия без статуса старее
-    else if (V2Status = '') then
-      Exit(-1); // Версия без статуса старее
-  finally
-    V1Parts.Free;
-    V2Parts.Free;
-  end;
-end;
-
 procedure TForm1.FindJarFiles;
 var
   Files: TStringList;
@@ -297,6 +301,7 @@ var
   AppPath, JarPath: string;
   VersionList: TStringList;
   Version, FileName: string;
+  Pos1, Pos2: Integer;
 begin
   try
     AppPath := ExtractFilePath(Application.ExeName);
@@ -323,10 +328,18 @@ begin
         if FileExists(JarPath) then
         begin
           FileName := ExtractFileName(JarPath);
-          // Извлекаем версию из имени файла (например, "1.8.18-Beta" из "Elephant-Monitor-1.8.18-Beta.jar")
-          Version := Copy(FileName, Pos('-', FileName) + 1, Length(FileName));
-          Version := Copy(Version, 1, Pos('.jar', Version) - 1);
-          VersionList.Add(Version + ';' + FileName);
+          // Извлекаем версию после второго '-' (например, "1.8.18-Beta" из "Elephant-Monitor-1.8.18-Beta.jar")
+          Pos1 := Pos('-', FileName);
+          if Pos1 > 0 then
+          begin
+            Pos2 := PosEx('-', FileName, Pos1 + 1);
+            if Pos2 > 0 then
+            begin
+              Version := Copy(FileName, Pos2 + 1, PosEx('.jar', FileName, Pos2) - (Pos2 + 1));
+              if Version <> '' then
+                VersionList.Add(Version + ';' + FileName);
+            end;
+          end;
         end;
       end;
 
